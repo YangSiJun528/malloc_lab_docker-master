@@ -11,6 +11,8 @@ CFLAGS = -Wall -O2 -g
 
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
 
+.PHONY: asan-ubsan valgrind-run
+
 mdriver: $(OBJS)
 	$(CC) $(CFLAGS) -o mdriver $(OBJS)
 
@@ -25,7 +27,16 @@ clock.o: clock.c clock.h
 handin:
 	cp mm.c $(HANDINDIR)/$(TEAM)-$(VERSION)-mm.c
 
+asan-ubsan:
+	$(MAKE) clean
+	$(MAKE) CFLAGS='-Wall -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer'
+	UBSAN_OPTIONS=print_stacktrace=1 ./mdriver -V -f short1-bal.rep
+
+valgrind-run:
+	$(MAKE) clean
+	$(MAKE) CFLAGS='-Wall -O0 -g'
+	valgrind --leak-check=full --track-origins=yes ./mdriver -V -f short1-bal.rep
+
 clean:
 	rm -f *~ *.o mdriver
-
 
