@@ -31,12 +31,21 @@ team_t team = {
     "yangsijun5528@gmail.com"
 };
 
-/* single word (4) or double word (8) alignment */
+// fundamental alignment:
+// 일반적인 C 객체를 안전하게 저장하기 위해 필요한 기본 정렬 수준.
+// (특별히 더 큰 정렬을 요구하는 over-aligned 타입은 제외)
+//
+// malloc이 반환하는 포인터는 적어도 이런 기본 정렬 요구를 만족해야 한다.
+// 이유는 CPU의 정렬된 메모리 접근, 컴파일러 최적화, ABI/struct layout이 alignment를 전제로 하기 때문이다.
+
+// malloc lab에서는 8-byte alignment면 충분하다고 가정한다.
 #define ALIGNMENT 8
 
-/* rounds up to the nearest multiple of ALIGNMENT */
+// ALIGNMENT == 8 이라는 가정 아래, size를 가장 가까운 8의 배수로 올림
+// size에 7을 더한 뒤 비트 연산으로 하위 3비트를 0으로 만들어 8의 배수로 맞춘다.
 #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
 
+// sizeof(size_t)를 정렬 단위에 맞게 올린 값. 보통 블록 헤더 크기나 payload 시작 위치 계산에 사용한다.
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 /*
