@@ -28,7 +28,11 @@ team_t team = {
     /* First member's full name */
     "Sijun Yang",
     /* First member's email address */
-    "yangsijun5528@gmail.com"
+    "yangsijun5528@gmail.com",
+    /* Second member's full name (leave blank if none) */
+    "",
+    /* Second member's email address (leave blank if none) */
+    ""
 };
 
 // fundamental alignment:
