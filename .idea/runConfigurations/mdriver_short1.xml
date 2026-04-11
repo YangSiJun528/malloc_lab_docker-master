@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="mdriver short1" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="-V -f short1-bal.rep" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="malloc_lab_docker" TARGET_NAME="mdriver" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="malloc_lab_docker" RUN_TARGET_NAME="mdriver">
+    <working directory value="$PROJECT_DIR$/cmake-build-debug-ninja" />
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>
