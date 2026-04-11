@@ -11,7 +11,7 @@ CFLAGS = -Wall -O2 -g
 
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
 
-.PHONY: asan-ubsan valgrind-run
+.PHONY: asan-ubsan valgrind-run plain-run
 
 mdriver: $(OBJS)
 	$(CC) $(CFLAGS) -o mdriver $(OBJS)
@@ -37,6 +37,10 @@ valgrind-run:
 	$(MAKE) CFLAGS='-Wall -O0 -g'
 	valgrind --leak-check=full --track-origins=yes ./mdriver -V -f short1-bal.rep
 
+plain-run:
+	$(MAKE) clean
+	$(MAKE) CFLAGS='-Wall -O2 -g'
+	./mdriver -V -f short1-bal.rep
+
 clean:
 	rm -f *~ *.o mdriver
-
