@@ -43,10 +43,30 @@ team_t team = {
 
 // ALIGNMENT == 8 이라는 가정 아래, size를 가장 가까운 8의 배수로 올림
 // size에 7을 더한 뒤 비트 연산으로 하위 3비트를 0으로 만들어 8의 배수로 맞춘다.
-#define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
+#define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1))
 
 // sizeof(size_t)를 정렬 단위에 맞게 올린 값. 보통 블록 헤더 크기나 payload 시작 위치 계산에 사용한다.
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+#define META_SIZE 4 // header 또는 footer 크기
+#define OVERHEAD (2 * META_SIZE) // 블록의 고정 메타데이터 크기(header + footer)
+#define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 크기
+
+#define MAX_VAL(x, y) ((x) > (y) ? (x) : (y))
+
+#define PACK(size, alloc) ((size) | (alloc)) // 블록 크기와 할당 비트를 하나의 워드에 저장
+
+#define GET(p) (*(unsigned int *)(p)) // 워드 읽기
+#define PUT(p, val) (*(unsigned int *)(p) = (val)) // 워드 쓰기
+
+#define GET_SIZE(p) (GET(p) & ~0x7) // 블록 크기 추출
+#define GET_ALLOC(p) (GET(p) & 0x1) // 할당 비트 추출
+
+#define HDRP(bp) ((char *)(bp) - META_SIZE) // payload 포인터로부터 header 주소를 계산
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - OVERHEAD) // payload 포인터로부터 footer 주소를 계산
+
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
+#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
 /*
  * mm_init - initialize the malloc package.
