@@ -58,11 +58,19 @@ team_t team = {
 
 #define MAX_VAL(x, y) ((x) > (y) ? (x) : (y))
 
-#define PACK(size, alloc) ((size) | (alloc)) // 블록 크기와 할당 비트를 하나의 워드에 저장
+// header/footer에 저장할 값을 만든다.
+// size는 header 크기가 아니라 header와 footer를 포함한 "블록 전체 크기"다.
+// is_alloc은 하위 1비트에 저장되며, size는 ALIGNMENT 때문에 하위 3비트가 0이라고 가정한다.
+#define PACK(size, is_alloc) ((size) | (is_alloc))
 
-#define GET(p) (*(unsigned int *)(p)) // 워드 읽기
-#define PUT(p, val) (*(unsigned int *)(p) = (val)) // 워드 쓰기
+#define GET_SIZE(p) (GET(p) & ~0x7)
+#define GET_ALLOC(p) (GET(p) & 0x1)
 
+#define GET_META(p) (*(unsigned int *)(p)) // 워드(4-byte metadata) 읽기
+#define PUT_META(p, val) (*(unsigned int *)(p) = (val)) // 워드(4-byte metadata) 쓰기
+
+// header/footer word에서 블록 전체 크기와 할당 비트를 분리한다.
+// 하위 3비트는 상태 bit 용도로 비워두고, 크기는 8-byte 단위로 정렬되어 있다.
 #define GET_SIZE(p) (GET(p) & ~0x7) // 블록 크기 추출
 #define GET_ALLOC(p) (GET(p) & 0x1) // 할당 비트 추출
 
@@ -72,10 +80,41 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
+static void *extend_heap(size_t words) {
+    return 0;
+}
+
 /*
  * mm_init - initialize the malloc package.
  */
 int mm_init(void) {
+    char *heap_initp = mem_sbrk(4 * META_SIZE);
+    if (heap_initp == (void *) -1) {
+        return -1;
+    }
+
+    // heap_listp가 8-byte alignment를 가지기 위해서 패딩 추가
+    PUT_META(heap_initp, 0);                                    // alignment padding
+    PUT_META(heap_initp + (1 * META_SIZE), PACK(OVERHEAD, 1));  // prologue header
+    PUT_META(heap_initp + (2 * META_SIZE), PACK(OVERHEAD, 1));  // prologue footer
+    PUT_META(heap_initp + (3 * META_SIZE), PACK(0, 1));         // epilogue header
+
+    /*
+     * 메모리 뷰 찍으면 이렇게 나옴
+     * pad           pro hdr       pro ftr       epi hdr
+     * 00 00 00 00   09 00 00 00   09 00 00 00   01 00 00 00
+     *
+     * 09: size:8 + alloc:1
+     * 01: size:0 + alloc:1
+     */
+
+    // heap_listp는 prologue payload 포인터
+    char *heap_listp = heap_initp + 2 * META_SIZE;
+
+    if (extend_heap(CHUNK_SIZE / META_SIZE) == NULL) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -98,6 +137,7 @@ void *mm_malloc(size_t size) {
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
+    // do nothing
 }
 
 /*
