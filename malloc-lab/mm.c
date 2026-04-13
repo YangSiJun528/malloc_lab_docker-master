@@ -79,6 +79,8 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
+#define LIST_COUNT 9 // segregated_free_list 범위 개수
+
 static char *heap_listp = NULL;
 
 typedef struct _Node {
@@ -88,32 +90,32 @@ typedef struct _Node {
 
 static Node *segregated_free_list[9] = { NULL, };
 
-static int class_index(size_t asize)
-{
-    if (asize <= 32)   return 0;
-    if (asize <= 64)   return 1;
-    if (asize <= 128)  return 2;
-    if (asize <= 256)  return 3;
-    if (asize <= 512)  return 4;
-    if (asize <= 1024) return 5;
-    if (asize <= 2048) return 6;
-    if (asize <= 4096) return 7;
-    return 8;
-}
-
 void *pop_list(size_t asize)
 {
-    int idx = class_index(asize);
-    Node *head = segregated_free_list[idx];
+    int idx = 0;
+    size_t bound = 32;
 
-    if (head == NULL) {
-        return NULL;
+    // asize가 32 이상이면 확인 계산 필요할때까지 2씩 곱함
+    while (idx < LIST_COUNT - 1 && asize > bound) {
+        bound <<= 1;
+        idx++;
     }
 
-    //TODO: 나중에 탐색을 통해서 best fit으로 바꿀 수도 있을 듯?
-    segregated_free_list[idx] = head->next; // next를 새로운 head로
-    head->next = NULL;
-    return head->bp;
+    // head가 있을 때까지 찾기
+    while (idx < LIST_COUNT) {
+        Node *head = segregated_free_list[idx];
+
+        if (head != NULL) {
+            //TODO: 나중에 탐색을 통해서 best fit으로 바꿀 수도 있을 듯?
+            segregated_free_list[idx] = head->next;
+            head->next = NULL;
+            return head->bp;
+        }
+
+        idx++;
+    }
+
+    return NULL;
 }
 
 // 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
@@ -213,22 +215,9 @@ int mm_init(void) {
 }
 
 
-// 요소 위에서부터 찾기
+// 요소 위에서부터 찾기 - segregated_free_list 최적화
 static void *first_fit(size_t asize) {
-    char *bp = pop_list(asize);
-
-    if (bp != NULL) {
-
-    }
-
-    while (GET_SIZE(HDRP(bp)) != 0) {
-        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
-            return bp;
-        }
-        bp = NEXT_BLKP(bp);
-    }
-
-    return NULL;
+    return pop_list(asize);
 }
 
 // 할당하는데, 필요하면 분할
