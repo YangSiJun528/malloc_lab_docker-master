@@ -55,7 +55,7 @@ team_t team = {
 #define META_SIZE 4 // header 또는 footer 크기
 #define OVERHEAD (2 * META_SIZE) // 블록의 고정 메타데이터 크기(header + footer)
 #define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 바이트 수 | (1 << 12) 4096
-#define MIN_BLOCK_SIZE (OVERHEAD + ALIGNMENT)
+#define MIN_BLOCK_SIZE (OVERHEAD + (2 * sizeof(size_t))) // prev/next를 담을 수 있어야 함
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
