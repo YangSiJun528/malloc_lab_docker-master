@@ -81,11 +81,14 @@ team_t team = {
 
 static char *heap_listp = NULL;
 static void *free_listp = NULL;
+static void *next_fitp = NULL;
 
 #define PREV_FREEP(bp) (*(void **)(bp))
 #define NEXT_FREEP(bp) (*(void **)((char *)(bp) + sizeof(void *)))
 #define SET_PREV_FREE(bp, prev) (PREV_FREEP(bp) = (prev))
 #define SET_NEXT_FREE(bp, next) (NEXT_FREEP(bp) = (next))
+
+static void remove_list(void *bp);
 
 // 새 free block을 free list head에 붙이는 LIFO 방식
 static void push_list(void *bp) {
@@ -97,33 +100,35 @@ static void push_list(void *bp) {
     }
 
     free_listp = bp;
+
+    if (next_fitp == NULL) {
+        next_fitp = bp;
+    }
 }
 
 static void *pop_list(size_t asize) {
-    void *bp = free_listp;
+    void *start;
+    void *bp;
 
-    while (bp != NULL) {
+    if (free_listp == NULL) {
+        return NULL;
+    }
+
+    if (next_fitp == NULL) {
+        next_fitp = free_listp;
+    }
+
+    start = next_fitp;
+    bp = start;
+
+    do {
         if (asize <= GET_SIZE(HDRP(bp))) {
-            void *prev = PREV_FREEP(bp);
-            void *next = NEXT_FREEP(bp);
-
-            if (prev != NULL) {
-                SET_NEXT_FREE(prev, next);
-            } else {
-                free_listp = next;
-            }
-
-            if (next != NULL) {
-                SET_PREV_FREE(next, prev);
-            }
-
-            SET_PREV_FREE(bp, NULL);
-            SET_NEXT_FREE(bp, NULL);
+            remove_list(bp);
             return bp;
         }
 
-        bp = NEXT_FREEP(bp);
-    }
+        bp = (NEXT_FREEP(bp) != NULL) ? NEXT_FREEP(bp) : free_listp;
+    } while (bp != start);
 
     return NULL;
 }
@@ -140,6 +145,14 @@ static void remove_list(void *bp) {
 
     if (next != NULL) {
         SET_PREV_FREE(next, prev);
+    }
+
+    if (next_fitp == bp) {
+        next_fitp = (next != NULL) ? next : free_listp;
+    }
+
+    if (free_listp == NULL) {
+        next_fitp = NULL;
     }
 
     SET_PREV_FREE(bp, NULL);
@@ -225,6 +238,7 @@ int mm_init(void) {
     // heap_listp는 prologue payload 포인터
     heap_listp = heap_initp + 2 * META_SIZE;
     free_listp = NULL;
+    next_fitp = NULL;
 
     /*
      * 메모리 뷰 찍으면 이렇게 나옴
@@ -245,7 +259,7 @@ int mm_init(void) {
 }
 
 
-static void *first_fit(size_t asize) {
+static void *next_fit(size_t asize) {
     return pop_list(asize);
 }
 
@@ -282,13 +296,13 @@ void *mm_malloc(size_t size) {
 
     asize = MAX(ALIGN(size + OVERHEAD), MIN_BLOCK_SIZE);
 
-    bp = first_fit(asize);
+    bp = next_fit(asize);
     if (bp == NULL) {
         extendsize = MAX(asize, CHUNK_SIZE);
 
         if (extend_heap(extendsize) == NULL) { return NULL; }
 
-        bp = first_fit(asize);
+        bp = next_fit(asize);
         if (bp == NULL) { return NULL; }
     }
 
