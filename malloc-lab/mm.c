@@ -90,7 +90,6 @@ team_t team = {
 
 #define LIST_COUNT 9 // segregated_free_list 범위 개수
 
-static char *heap_listp = NULL;
 static void *segregated_free_list[LIST_COUNT] = { NULL, };
 
 void *pop_list(size_t asize)
@@ -119,6 +118,31 @@ void *pop_list(size_t asize)
     }
 
     return NULL;
+}
+
+void push_list(void *bp) {
+    int idx = 0;
+    size_t bound = 32;
+    size_t size = GET_SIZE(HDRP(bp));
+    void *head;
+
+    // size가 32 이상이면 확인 계산 필요할때까지 2씩 곱함
+    while (idx < LIST_COUNT - 1 && size > bound) {
+        bound <<= 1;
+        idx++;
+    }
+
+    // 바로 head로 추가 (FIFO)
+    head = segregated_free_list[idx];
+
+    PUT_PREV_FREE(bp, NULL);
+    PUT_NEXT_FREE(bp, head);
+
+    if (head != NULL) {
+        PUT_PREV_FREE(head, bp);
+    }
+
+    segregated_free_list[idx] = bp;
 }
 
 // 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
@@ -154,6 +178,8 @@ static void *coalesce(void *bp) {
 }
 
 static void *extend_heap(size_t bytes) {
+    // 어차피 CHUCK_SIZE이상이라 굳이 예외처리할 정도는 아닌데, 인식하곤 있어야 함.
+    assert (bytes >= MIN_BLOCK_SIZE);
     size_t size = ALIGN(bytes);
     char *bp = mem_sbrk(size); // 새 시작 주소
     if (bp == (void *) -1) {
@@ -162,9 +188,14 @@ static void *extend_heap(size_t bytes) {
 
     assert(size % ALIGNMENT == 0); // 정렬된 상태
 
-    PUT_META(HDRP(bp), PACK(size, 0));
-    PUT_META(FTRP(bp), PACK(size, 0));
-    PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+
+    PUT_META(HDRP(bp), PACK(size, 0)); // new hdr
+    PUT_META(FTRP(bp), PACK(size, 0)); // new ftr
+    push_list(bp);
+    PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); // epi hdr 설정
+
+    assert(PREV_FREEP(bp) == NULL);
+    assert(NEXT_FREEP(bp) == NULL);
 
     /*
      * mm_init에서의 최초 호출에서 메모리 뷰 찍으면 이렇게 나옴
@@ -175,7 +206,7 @@ static void *extend_heap(size_t bytes) {
      * 00 00 00 00   00 00 00 00   00 10 00 00   01 00 00 00
      *
      * 00 10 00 00 = 10^12 = 4092
-     * 즉, new hdr은 할당되지 않았으며 4092 byte의 공간을 가진다는 의미.
+     * 즉, new hdr은 아직 할당되지 않았으며 4092 byte의 공간을 가진다는 의미.
      */
 
     return coalesce(bp);
@@ -185,6 +216,10 @@ static void *extend_heap(size_t bytes) {
  * mm_init - initialize the malloc package.
  */
 int mm_init(void) {
+    for (int i = 0; i < LIST_COUNT; i++) {
+        segregated_free_list[i] = NULL;
+    }
+
     char *heap_initp = mem_sbrk(4 * META_SIZE);
     if (heap_initp == (void *) -1) {
         return -1;
@@ -206,9 +241,6 @@ int mm_init(void) {
      * 09 00 00 00: size:8 + alloc:1
      * 01 00 00 00: size:0 + alloc:1
      */
-
-    // heap_listp는 prologue payload 포인터
-    heap_listp = heap_initp + 2 * META_SIZE;
 
     if (extend_heap(CHUNK_SIZE) == NULL) {
         return -1;
