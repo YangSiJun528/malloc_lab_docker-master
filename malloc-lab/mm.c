@@ -56,7 +56,7 @@ team_t team = {
 #define OVERHEAD (2 * META_SIZE) // 블록의 고정 메타데이터 크기(header + footer)
 #define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 바이트 수 | (1 << 12) 4096
 
-#define MAX_VAL(x, y) ((x) > (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 // header/footer에 저장할 값을 만든다.
 // size는 header 크기가 아니라 header와 footer를 포함한 "블록 전체 크기"다.
