@@ -216,7 +216,7 @@ static void place(void *bp, size_t asize)
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
-    size_t asize;
+    size_t asize; // adjusted size - 조정된 크기
     size_t extendsize;
     char *bp;
 
@@ -254,17 +254,61 @@ void mm_free(void *ptr) {
 void *mm_realloc(void *ptr, size_t size) {
     if (ptr == NULL) return mm_malloc(size);
 
-    // 표준적인 동작의 realloc은 size 0이면 free 해야한다함.
     if (size == 0) {
         mm_free(ptr);
         return NULL;
     }
 
+    size_t old_size = GET_SIZE(HDRP(ptr));
+    size_t asize = MAX(ALIGN(size + OVERHEAD), MIN_BLOCK_SIZE);
+
+    /* 1) 이미 충분히 크면 shrink */
+    if (asize <= old_size) {
+        size_t remain = old_size - asize;
+
+        if (remain >= MIN_BLOCK_SIZE) {
+            PUT_META(HDRP(ptr), PACK(old_size, 0));
+            PUT_META(FTRP(ptr), PACK(old_size, 0));
+
+            place(ptr, asize);
+
+            void *split_bp = NEXT_BLKP(ptr);
+            coalesce(split_bp);
+        }
+
+        return ptr;
+    }
+
+    /* 2) 다음 블록이 free면 흡수해서 in-place expand 시도 */
+    void *next_bp = NEXT_BLKP(ptr);
+    if (!GET_ALLOC(HDRP(next_bp))) {
+        size_t next_size = GET_SIZE(HDRP(next_bp));
+        size_t total_size = old_size + next_size;
+
+        if (total_size >= asize) {
+            /* ptr + next_bp를 하나의 큰 free block으로 만든다 */
+            PUT_META(HDRP(ptr), PACK(total_size, 0));
+            PUT_META(FTRP(ptr), PACK(total_size, 0));
+
+            /* 필요한 만큼 다시 alloc */
+            place(ptr, asize);
+
+            /* 남은 free block이 있으면 뒤와 coalesce */
+            if (total_size - asize >= MIN_BLOCK_SIZE) {
+                void *split_bp = NEXT_BLKP(ptr);
+                coalesce(split_bp);
+            }
+
+            return ptr;
+        }
+    }
+
+    /* 3) 불가능하면 새로 할당 후 복사 */
     void *newptr = mm_malloc(size);
     if (newptr == NULL) return NULL;
 
-    size_t old_payload_size = GET_SIZE(HDRP(ptr)) - OVERHEAD;
-    size_t copy_size = MIN(old_payload_size, size);
+    size_t old_payload = old_size - OVERHEAD;
+    size_t copy_size = MIN(size, old_payload);
     memcpy(newptr, ptr, copy_size);
     mm_free(ptr);
 
