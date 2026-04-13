@@ -143,15 +143,20 @@ static void *coalesce(void *bp) {
 
     if (prev_alloc && !next_alloc) {
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        SET_NEXT_FREE(bp, NEXT_FREEP(NEXT_BLKP(bp)));
         PUT_META(HDRP(bp), PACK(size, 0));
         PUT_META(FTRP(bp), PACK(size, 0));
     } else if (!prev_alloc && next_alloc) {
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        SET_PREV_FREE(bp, PREV_FREEP(PREV_BLKP(bp)));
         PUT_META(FTRP(bp), PACK(size, 0));
         PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     } else {
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        //TODO 이거 변수로 뺴야함.
+        SET_NEXT_FREE(bp, NEXT_FREEP(NEXT_BLKP(bp)));
+        SET_PREV_FREE(bp, PREV_FREEP(PREV_BLKP(bp)));
         PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT_META(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
@@ -175,8 +180,7 @@ static void *extend_heap(size_t bytes) {
     PUT_META(HDRP(bp), PACK(size, 0)); // new hdr
     PUT_META(FTRP(bp), PACK(size, 0)); // new ftr
     PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); // epi hdr 설정
-    SET_PREV_FREE(bp, NULL);
-    SET_NEXT_FREE(bp, NULL);
+    push_list(bp);
 
     /*
      * mm_init에서의 최초 호출에서 메모리 뷰 찍으면 이렇게 나옴
