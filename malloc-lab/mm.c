@@ -54,7 +54,7 @@ team_t team = {
 
 #define META_SIZE 4 // header 또는 footer 크기
 #define OVERHEAD (2 * META_SIZE) // 블록의 고정 메타데이터 크기(header + footer)
-#define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 크기
+#define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 바이트 수 | (1 << 12) 4096
 
 #define MAX_VAL(x, y) ((x) > (y) ? (x) : (y))
 
@@ -63,16 +63,13 @@ team_t team = {
 // is_alloc은 하위 1비트에 저장되며, size는 ALIGNMENT 때문에 하위 3비트가 0이라고 가정한다.
 #define PACK(size, is_alloc) ((size) | (is_alloc))
 
-#define GET_SIZE(p) (GET(p) & ~0x7)
-#define GET_ALLOC(p) (GET(p) & 0x1)
-
-#define GET_META(p) (*(unsigned int *)(p)) // 워드(4-byte metadata) 읽기
-#define PUT_META(p, val) (*(unsigned int *)(p) = (val)) // 워드(4-byte metadata) 쓰기
+#define GET_META(p) (*(unsigned int *)(p)) // 4-byte metadata 읽기
+#define PUT_META(p, val) (*(unsigned int *)(p) = (val)) // 4-byte metadata 쓰기
 
 // header/footer word에서 블록 전체 크기와 할당 비트를 분리한다.
 // 하위 3비트는 상태 bit 용도로 비워두고, 크기는 8-byte 단위로 정렬되어 있다.
-#define GET_SIZE(p) (GET(p) & ~0x7) // 블록 크기 추출
-#define GET_ALLOC(p) (GET(p) & 0x1) // 할당 비트 추출
+#define GET_SIZE(p) (GET_META(p) & ~0x7) // 블록 크기 추출
+#define GET_ALLOC(p) (GET_META(p) & 0x1) // 할당 비트 추출
 
 #define HDRP(bp) ((char *)(bp) - META_SIZE) // payload 포인터로부터 header 주소를 계산
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - OVERHEAD) // payload 포인터로부터 footer 주소를 계산
@@ -80,8 +77,66 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
-static void *extend_heap(size_t words) {
-    return 0;
+static char *heap_listp = NULL;
+
+// 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
+// 호출되는 케이스
+// 1. heap 공간 확장
+// 2. 사용자가 할당된 메모리 공간 헤제(`mm_free()`) 요청
+static void *coalesce(void *bp) {
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(HDRP(bp));
+
+    if (prev_alloc && next_alloc) {
+        return bp;
+    }
+
+    if (prev_alloc && !next_alloc) {
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT_META(HDRP(bp), PACK(size, 0));
+        PUT_META(FTRP(bp), PACK(size, 0));
+    } else if (!prev_alloc && next_alloc) {
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT_META(FTRP(bp), PACK(size, 0));
+        PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    } else {
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT_META(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+
+    return bp;
+}
+
+static void *extend_heap(size_t bytes) {
+    size_t size = ALIGN(bytes);
+    char *bp = mem_sbrk(size); // 새 시작 주소
+    if (bp == (void *) -1) {
+        return NULL;
+    }
+
+    assert(size % ALIGNMENT == 0); // 정렬된 상태
+
+    PUT_META(HDRP(bp), PACK(size, 0));
+    PUT_META(FTRP(bp), PACK(size, 0));
+    PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+
+    /*
+     * mm_init에서의 최초 호출에서 메모리 뷰 찍으면 이렇게 나옴
+     * pad           pro hdr       pro ftr       new hdr
+     * 00 00 00 00   09 00 00 00   09 00 00 00   00 10 00 00
+     * ...
+     * new pld       new pld       new ftr       epi hdr
+     * 00 00 00 00   00 00 00 00   00 10 00 00   01 00 00 00
+     *
+     * 00 10 00 00 = 10^12 = 4092
+     * 즉, new hdr은 할당되지 않았으며 4092 byte의 공간을 가진다는 의미.
+     */
+
+    return coalesce(bp);
 }
 
 /*
@@ -104,14 +159,16 @@ int mm_init(void) {
      * pad           pro hdr       pro ftr       epi hdr
      * 00 00 00 00   09 00 00 00   09 00 00 00   01 00 00 00
      *
-     * 09: size:8 + alloc:1
-     * 01: size:0 + alloc:1
+     * 리틀 엔디언이라 순서가 반대임.
+     *
+     * 09 00 00 00: size:8 + alloc:1
+     * 01 00 00 00: size:0 + alloc:1
      */
 
     // heap_listp는 prologue payload 포인터
-    char *heap_listp = heap_initp + 2 * META_SIZE;
+    heap_listp = heap_initp + 2 * META_SIZE;
 
-    if (extend_heap(CHUNK_SIZE / META_SIZE) == NULL) {
+    if (extend_heap(CHUNK_SIZE) == NULL) {
         return -1;
     }
 
