@@ -55,8 +55,10 @@ team_t team = {
 #define META_SIZE 4 // header 또는 footer 크기
 #define OVERHEAD (2 * META_SIZE) // 블록의 고정 메타데이터 크기(header + footer)
 #define CHUNK_SIZE (1 << 12) // 힙을 한 번 늘릴 때 사용하는 바이트 수 | (1 << 12) 4096
+#define MIN_BLOCK_SIZE (OVERHEAD + ALIGNMENT)
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
 
 // header/footer에 저장할 값을 만든다.
 // size는 header 크기가 아니라 header와 footer를 포함한 "블록 전체 크기"다.
@@ -175,36 +177,96 @@ int mm_init(void) {
     return 0;
 }
 
+
+// 요소 위에서부터 찾기
+static void *first_fit(size_t asize) {
+    char *bp = heap_listp;
+
+    while (GET_SIZE(HDRP(bp)) != 0) {
+        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
+            return bp;
+        }
+        bp = NEXT_BLKP(bp);
+    }
+
+    return NULL;
+}
+
+// 할당하는데, 필요하면 분할
+static void place(void *bp, size_t asize)
+{
+    size_t free_size      = GET_SIZE(HDRP(bp));
+    size_t remain_size    = free_size - asize;
+    int split_required    = remain_size >= MIN_BLOCK_SIZE;
+    size_t allocated_size = split_required ? asize : free_size;
+
+    PUT_META(HDRP(bp), PACK(allocated_size, 1));
+    PUT_META(FTRP(bp), PACK(allocated_size, 1));
+
+    if (split_required) {
+        void *next_bp = NEXT_BLKP(bp); // 방금 만들었던 곳으로 이동
+
+        PUT_META(HDRP(next_bp), PACK(remain_size, 0));
+        PUT_META(FTRP(next_bp), PACK(remain_size, 0));
+    }
+}
+
 /*
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
-    // do nothing
+    size_t asize;
+    size_t extendsize;
+    char *bp;
+
+    if (size == 0) { return NULL; }
+
+    asize = MAX(ALIGN(size + OVERHEAD), MIN_BLOCK_SIZE);
+
+    bp = first_fit(asize);
+    if (bp == NULL) {
+        extendsize = MAX(asize, CHUNK_SIZE);
+
+        bp = extend_heap(extendsize);
+        if (bp == NULL) { return NULL; }
+    }
+
+    place(bp, asize);
+    return bp;
 }
 
 /*
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
-    // do nothing
+    if (ptr == NULL) return;
+
+    size_t size = GET_SIZE(HDRP(ptr));
+    PUT_META(HDRP(ptr), PACK(size, 0));
+    PUT_META(FTRP(ptr), PACK(size, 0));
+    coalesce(ptr);
 }
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
 void *mm_realloc(void *ptr, size_t size) {
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
+    if (ptr == NULL) return mm_malloc(size);
 
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
+    // 표준적인 동작의 realloc은 size 0이면 free 해야한다함.
+    if (size == 0) {
+        mm_free(ptr);
         return NULL;
-    copySize = *(size_t *) ((char *) oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-        copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
+    }
+
+    void *newptr = mm_malloc(size);
+    if (newptr == NULL) return NULL;
+
+    size_t old_payload_size = GET_SIZE(HDRP(ptr)) - OVERHEAD;
+    size_t copy_size = MIN(old_payload_size, size);
+    memcpy(newptr, ptr, copy_size);
+    mm_free(ptr);
+
     return newptr;
 }
