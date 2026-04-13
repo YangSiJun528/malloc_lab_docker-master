@@ -139,3 +139,67 @@ git push -u origin main
 - VSCode 내에서 코드 작성, 컴파일, 디버깅까지 한 번에 가능
 
 ---
+
+# 내 메모
+
+## 테스크 실행하는 법
+
+작업 폴더로 이동
+
+```bash
+cd malloc-lab
+```
+
+Release로 빌드 후 실행 (현재 Clion 설정은 Debug 빌드만 있음)
+
+```bash
+make clean
+make 
+./mdriver -V
+```
+
+## 실행 결과 읽는 법
+
+### 항목 분석
+
+`./mdriver -V`를 실행하면 각 trace별 결과와 전체 점수가 출력됩니다.
+
+```text
+trace  valid  util     ops      secs  Kops
+ 0       yes   99%    5694  0.005317  1071
+```
+
+- `trace`: 실행한 trace 파일 번호입니다. 기본 순서는 `malloc-lab/config.h`의 `DEFAULT_TRACEFILES`에 정의되어 있습니다.
+- `valid`: 정확성 검사 결과입니다. `yes`면 해당 trace에서 `malloc/free/realloc`이 정상 동작했다는 뜻입니다. 하나라도 `no`면 먼저 correctness 버그를 고쳐야 합니다.
+- `util`: 공간 효율입니다. 실행 중 실제 payload 사용량의 최대치 대비 allocator가 사용한 heap 크기의 비율입니다. 높을수록 메모리 낭비가 적습니다.
+- `ops`: trace에 들어 있는 요청 수입니다. `malloc`, `free`, `realloc` 호출 횟수의 합입니다.
+- `secs`: 해당 trace를 처리하는 데 걸린 시간입니다.
+- `Kops`: 초당 몇 천 개의 요청을 처리했는지 나타냅니다. `ops / 1000 / secs`로 계산됩니다.
+
+마지막의 `Perf index`는 최종 성능 점수입니다.
+
+```text
+Perf index = 44 (util) + 12 (thru) = 57/100
+```
+
+이 설정에서는 공간 효율이 최대 60점, 처리량이 최대 40점입니다. 따라서 `valid`가 전부 `yes`라면 기능적으로는 통과한 것이고, `Perf index`는 그 allocator가 얼마나 효율적인지를 나타내는 성능 점수입니다.
+
+### trace 정리
+
+기본 실행(`./mdriver -V`)에서 사용하는 trace 순서는 `malloc-lab/config.h`의 `DEFAULT_TRACEFILES`와 같습니다.
+
+| 번호 | trace 파일 | 주로 보는 것 |
+|------|------------|--------------|
+| 0 | `amptjp-bal.rep` | 실제 프로그램에서 나온 할당/해제 패턴입니다. 일반적인 allocator 동작을 봅니다. |
+| 1 | `cccp-bal.rep` | 실제 프로그램에서 나온 할당/해제 패턴입니다. 일반적인 allocator 동작을 봅니다. |
+| 2 | `cp-decl-bal.rep` | 실제 프로그램에서 나온 할당/해제 패턴입니다. 일반적인 allocator 동작을 봅니다. |
+| 3 | `expr-bal.rep` | 실제 프로그램에서 나온 할당/해제 패턴입니다. 일반적인 allocator 동작을 봅니다. |
+| 4 | `coalescing-bal.rep` | 인접한 free block을 잘 합치는지 봅니다. 병합이 안 되면 큰 요청을 처리하기 어렵습니다. |
+| 5 | `random-bal.rep` | 임의의 malloc/free 패턴입니다. 전반적인 정확성과 안정성을 봅니다. |
+| 6 | `random2-bal.rep` | 다른 랜덤 패턴입니다. 특정 순서에만 우연히 맞는 구현인지 확인하는 데 도움이 됩니다. |
+| 7 | `binary-bal.rep` | 작은 블록과 큰 블록을 번갈아 할당한 뒤 특정 크기 블록을 다시 요청합니다. first fit 탐색 비용과 외부 단편화 영향을 보기 좋습니다. |
+| 8 | `binary2-bal.rep` | `binary-bal.rep`와 비슷하지만 블록 크기와 요청 수가 다릅니다. 선형 탐색 allocator는 여기서 느려지기 쉽습니다. |
+| 9 | `realloc-bal.rep` | 같은 블록을 계속 키우는 realloc 패턴입니다. 매번 새로 malloc-copy-free 하면 느리고 공간 효율도 낮아집니다. |
+| 10 | `realloc2-bal.rep` | realloc이 섞인 다른 패턴입니다. 기존 데이터 보존과 realloc 처리 방식을 확인합니다. |
+
+파일 이름의 `-bal`은 balanced trace라는 뜻입니다. 할당된 블록마다 대응되는 `free` 요청이 있어서 trace가 끝날 때 정리되는 형태입니다.
