@@ -87,8 +87,8 @@ static void *free_listp = NULL;
 #define SET_PREV_FREE(bp, prev) (PREV_FREEP(bp) = (prev))
 #define SET_NEXT_FREE(bp, next) (NEXT_FREEP(bp) = (next))
 
-//FIFO
-void push_list(void *bp) {
+// 새 free block을 free list head에 붙이는 LIFO 방식
+static void push_list(void *bp) {
     SET_PREV_FREE(bp, NULL);
     SET_NEXT_FREE(bp, free_listp);
 
@@ -99,7 +99,7 @@ void push_list(void *bp) {
     free_listp = bp;
 }
 
-void *pop_list(size_t asize) {
+static void *pop_list(size_t asize) {
     void *bp = free_listp;
 
     while (bp != NULL) {
@@ -128,39 +128,49 @@ void *pop_list(size_t asize) {
     return NULL;
 }
 
+static void remove_list(void *bp) {
+    void *prev = PREV_FREEP(bp);
+    void *next = NEXT_FREEP(bp);
+
+    if (prev != NULL) {
+        SET_NEXT_FREE(prev, next);
+    } else {
+        free_listp = next;
+    }
+
+    if (next != NULL) {
+        SET_PREV_FREE(next, prev);
+    }
+
+    SET_PREV_FREE(bp, NULL);
+    SET_NEXT_FREE(bp, NULL);
+}
+
 // 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
 // 호출되는 케이스
 // 1. heap 공간 확장
 // 2. 사용자가 할당된 메모리 공간 헤제(`mm_free()`) 요청
 static void *coalesce(void *bp) {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    void *prev_bp = PREV_BLKP(bp);
+    void *next_bp = NEXT_BLKP(bp);
+    size_t prev_alloc = GET_ALLOC(FTRP(prev_bp));
+    size_t next_alloc = GET_ALLOC(HDRP(next_bp));
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc) {
-        return bp;
+    if (!prev_alloc) {
+        remove_list(prev_bp);
+        size += GET_SIZE(HDRP(prev_bp));
+        bp = prev_bp;
     }
 
-    if (prev_alloc && !next_alloc) {
-        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        SET_NEXT_FREE(bp, NEXT_FREEP(NEXT_BLKP(bp)));
-        PUT_META(HDRP(bp), PACK(size, 0));
-        PUT_META(FTRP(bp), PACK(size, 0));
-    } else if (!prev_alloc && next_alloc) {
-        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        SET_PREV_FREE(bp, PREV_FREEP(PREV_BLKP(bp)));
-        PUT_META(FTRP(bp), PACK(size, 0));
-        PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        bp = PREV_BLKP(bp);
-    } else {
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        //TODO 이거 변수로 뺴야함.
-        SET_NEXT_FREE(bp, NEXT_FREEP(NEXT_BLKP(bp)));
-        SET_PREV_FREE(bp, PREV_FREEP(PREV_BLKP(bp)));
-        PUT_META(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT_META(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
-        bp = PREV_BLKP(bp);
+    if (!next_alloc) {
+        remove_list(next_bp);
+        size += GET_SIZE(HDRP(next_bp));
     }
+
+    PUT_META(HDRP(bp), PACK(size, 0));
+    PUT_META(FTRP(bp), PACK(size, 0));
+    push_list(bp);
 
     return bp;
 }
@@ -180,7 +190,8 @@ static void *extend_heap(size_t bytes) {
     PUT_META(HDRP(bp), PACK(size, 0)); // new hdr
     PUT_META(FTRP(bp), PACK(size, 0)); // new ftr
     PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); // epi hdr 설정
-    push_list(bp);
+    SET_PREV_FREE(bp, NULL);
+    SET_NEXT_FREE(bp, NULL);
 
     /*
      * mm_init에서의 최초 호출에서 메모리 뷰 찍으면 이렇게 나옴
@@ -235,16 +246,7 @@ int mm_init(void) {
 
 
 static void *first_fit(size_t asize) {
-    char *bp = heap_listp;
-
-    while (GET_SIZE(HDRP(bp)) != 0) {
-        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
-            return bp;
-        }
-        bp = NEXT_BLKP(bp);
-    }
-
-    return NULL;
+    return pop_list(asize);
 }
 
 // 할당하는데, 필요하면 분할
@@ -263,6 +265,7 @@ static void place(void *bp, size_t asize)
 
         PUT_META(HDRP(next_bp), PACK(remain_size, 0));
         PUT_META(FTRP(next_bp), PACK(remain_size, 0));
+        coalesce(next_bp);
     }
 }
 
@@ -283,7 +286,9 @@ void *mm_malloc(size_t size) {
     if (bp == NULL) {
         extendsize = MAX(asize, CHUNK_SIZE);
 
-        bp = extend_heap(extendsize);
+        if (extend_heap(extendsize) == NULL) { return NULL; }
+
+        bp = first_fit(asize);
         if (bp == NULL) { return NULL; }
     }
 
@@ -326,9 +331,6 @@ void *mm_realloc(void *ptr, size_t size) {
             PUT_META(FTRP(ptr), PACK(old_size, 0));
 
             place(ptr, asize);
-
-            void *split_bp = NEXT_BLKP(ptr);
-            coalesce(split_bp);
         }
 
         return ptr;
@@ -341,18 +343,14 @@ void *mm_realloc(void *ptr, size_t size) {
         size_t total_size = old_size + next_size;
 
         if (total_size >= asize) {
+            remove_list(next_bp);
+
             /* ptr + next_bp를 하나의 큰 free block으로 만든다 */
             PUT_META(HDRP(ptr), PACK(total_size, 0));
             PUT_META(FTRP(ptr), PACK(total_size, 0));
 
             /* 필요한 만큼 다시 alloc */
             place(ptr, asize);
-
-            /* 남은 free block이 있으면 뒤와 coalesce */
-            if (total_size - asize >= MIN_BLOCK_SIZE) {
-                void *split_bp = NEXT_BLKP(ptr);
-                coalesce(split_bp);
-            }
 
             return ptr;
         }
