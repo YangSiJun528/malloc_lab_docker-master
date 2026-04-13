@@ -81,6 +81,41 @@ team_t team = {
 
 static char *heap_listp = NULL;
 
+typedef struct _Node {
+    struct _Node *next;
+    void *bp;
+} Node;
+
+static Node *segregated_free_list[9] = { NULL, };
+
+static int class_index(size_t asize)
+{
+    if (asize <= 32)   return 0;
+    if (asize <= 64)   return 1;
+    if (asize <= 128)  return 2;
+    if (asize <= 256)  return 3;
+    if (asize <= 512)  return 4;
+    if (asize <= 1024) return 5;
+    if (asize <= 2048) return 6;
+    if (asize <= 4096) return 7;
+    return 8;
+}
+
+void *pop_list(size_t asize)
+{
+    int idx = class_index(asize);
+    Node *head = segregated_free_list[idx];
+
+    if (head == NULL) {
+        return NULL;
+    }
+
+    //TODO: 나중에 탐색을 통해서 best fit으로 바꿀 수도 있을 듯?
+    segregated_free_list[idx] = head->next; // next를 새로운 head로
+    head->next = NULL;
+    return head->bp;
+}
+
 // 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
 // 호출되는 케이스
 // 1. heap 공간 확장
@@ -180,7 +215,11 @@ int mm_init(void) {
 
 // 요소 위에서부터 찾기
 static void *first_fit(size_t asize) {
-    char *bp = heap_listp;
+    char *bp = pop_list(asize);
+
+    if (bp != NULL) {
+
+    }
 
     while (GET_SIZE(HDRP(bp)) != 0) {
         if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
