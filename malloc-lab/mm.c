@@ -79,18 +79,55 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
-// bp 블록 시작 주소 포인터가 바라보는 포인터의 값
-// bp 블록 시작 주소 포인터 - prev payload 포인터
-// prev가 바라보는 포인터 - prev의 payload
-// prev의 payload의 값 - 역참조 사용
+static char *heap_listp = NULL;
+static void *free_listp = NULL;
+
 #define PREV_FREEP(bp) (*(void **)(bp))
 #define NEXT_FREEP(bp) (*(void **)((char *)(bp) + sizeof(void *)))
-#define PUT_PREV_FREE(bp, val) (PREV_FREEP(bp) = (val))
-#define PUT_NEXT_FREE(bp, val) (NEXT_FREEP(bp) = (val))
+#define SET_PREV_FREE(bp, prev) (PREV_FREEP(bp) = (prev))
+#define SET_NEXT_FREE(bp, next) (NEXT_FREEP(bp) = (next))
 
-#define LIST_COUNT 9 // segregated_free_list 범위 개수
+//FIFO
+void push_list(void *bp) {
+    SET_PREV_FREE(bp, NULL);
+    SET_NEXT_FREE(bp, free_listp);
 
-static char *heap_listp = NULL;
+    if (free_listp != NULL) {
+        SET_PREV_FREE(free_listp, bp);
+    }
+
+    free_listp = bp;
+}
+
+void *pop_list(size_t asize) {
+    void *bp = free_listp;
+
+    while (bp != NULL) {
+        if (asize <= GET_SIZE(HDRP(bp))) {
+            void *prev = PREV_FREEP(bp);
+            void *next = NEXT_FREEP(bp);
+
+            if (prev != NULL) {
+                SET_NEXT_FREE(prev, next);
+            } else {
+                free_listp = next;
+            }
+
+            if (next != NULL) {
+                SET_PREV_FREE(next, prev);
+            }
+
+            SET_PREV_FREE(bp, NULL);
+            SET_NEXT_FREE(bp, NULL);
+            return bp;
+        }
+
+        bp = NEXT_FREEP(bp);
+    }
+
+    return NULL;
+}
+
 // 메모리 추가 공간이 생기면 인접한 free 상태의 블록과 합치는(coalesce) 역할
 // 호출되는 케이스
 // 1. heap 공간 확장
@@ -120,9 +157,6 @@ static void *coalesce(void *bp) {
         bp = PREV_BLKP(bp);
     }
 
-    PUT_NEXT_FREE(bp, NEXT_BLKP(bp));
-    PUT_PREV_FREE(bp, PREV_BLKP(bp));
-
     return bp;
 }
 
@@ -141,10 +175,8 @@ static void *extend_heap(size_t bytes) {
     PUT_META(HDRP(bp), PACK(size, 0)); // new hdr
     PUT_META(FTRP(bp), PACK(size, 0)); // new ftr
     PUT_META(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); // epi hdr 설정
-    //TODO: prev, next 설정
-
-    assert(PREV_FREEP(bp) == NULL);
-    assert(NEXT_FREEP(bp) == NULL);
+    SET_PREV_FREE(bp, NULL);
+    SET_NEXT_FREE(bp, NULL);
 
     /*
      * mm_init에서의 최초 호출에서 메모리 뷰 찍으면 이렇게 나옴
@@ -177,6 +209,7 @@ int mm_init(void) {
     PUT_META(heap_initp + (3 * META_SIZE), PACK(0, 1));         // epilogue header
     // heap_listp는 prologue payload 포인터
     heap_listp = heap_initp + 2 * META_SIZE;
+    free_listp = NULL;
 
     /*
      * 메모리 뷰 찍으면 이렇게 나옴
@@ -197,13 +230,8 @@ int mm_init(void) {
 }
 
 
-// 요소 위에서부터 찾기 - segregated_free_list 최적화
 static void *first_fit(size_t asize) {
     char *bp = heap_listp;
-
-    if (bp != NULL) {
-
-    }
 
     while (GET_SIZE(HDRP(bp)) != 0) {
         if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
@@ -213,8 +241,6 @@ static void *first_fit(size_t asize) {
     }
 
     return NULL;
-}
-
 }
 
 // 할당하는데, 필요하면 분할
