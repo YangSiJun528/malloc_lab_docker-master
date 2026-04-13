@@ -247,3 +247,15 @@ Total          80%  112372  0.260114   432
 
 Perf index = 48 (util) + 29 (thru) = 77/100
 ```
+
+#### AI 피드백
+
+v2에서는 `realloc-bal.rep` 성능이 크게 좋아졌습니다. 기존에는 `realloc`마다 새 블록을 할당하고 복사한 뒤 이전 블록을 해제했지만, v2에서는 다음 free block을 흡수해 제자리 확장을 시도하기 때문입니다.
+
+아직 낮게 나오는 부분은 7번, 8번 trace입니다. `binary-bal.rep`, `binary2-bal.rep`는 작은 블록과 큰 블록을 번갈아 할당한 뒤 일부 큰 블록을 free하고 더 큰 블록을 다시 요청하는 패턴입니다. 현재 구현은 implicit free list + first fit이라 매번 heap 처음부터 선형 탐색합니다. 그래서 앞쪽에 "free이지만 요청보다 작아서 못 쓰는 블록"이 많이 쌓이면 탐색 시간이 길어지고 `Kops`가 낮아집니다.
+
+또한 7번, 8번의 `util`이 낮은 이유는 외부 단편화 때문입니다. 외부 단편화는 free 공간의 총량은 충분하지만, 큰 요청을 담을 만큼 연속된 free block이 없는 상태를 말합니다. 예를 들어 448 byte free block이 여러 개 있어도 사이에 64 byte allocated block이 끼어 있으면 서로 합칠 수 없습니다. 이 상태에서 512 byte 요청이 들어오면 기존 free block들을 재사용하지 못하고 heap을 새로 늘리게 됩니다. 그래서 payload 대비 heap 크기가 커지고 `util`이 낮아집니다.
+
+4번 `coalescing-bal.rep`의 `util`이 낮은 것은 조금 다른 이유입니다. 이 trace는 4095 byte 블록 두 개를 할당했다가 해제한 뒤 8190 byte 블록을 다시 요청하는 패턴입니다. payload 기준으로는 `4095 + 4095 = 8190`이라 딱 맞아 보이지만, allocator 내부에서는 header/footer와 8 byte alignment가 추가됩니다. 4095 byte 요청 하나는 실제로 `ALIGN(4095 + 8) = 4104` byte 블록이 필요합니다. 그런데 현재 기본 heap 확장 단위는 `CHUNK_SIZE = 4096`이므로 4095 byte 요청 하나가 기본 chunk 하나에 딱 들어가지 않습니다. 이 때문에 실제 heap 사용량이 payload보다 커지고 `util`이 낮게 나옵니다.
+
+정리하면 v2의 남은 병목은 `realloc`보다 `first_fit` 탐색 방식입니다. 다음 개선 방향은 `next fit`, explicit free list, segregated free list 순서로 생각할 수 있습니다.
