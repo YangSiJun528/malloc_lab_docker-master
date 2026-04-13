@@ -79,16 +79,19 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp))) // 현재 블록 다음 블록의 payload 주소를 계산
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - OVERHEAD)) // 현재 블록 이전 블록의 payload 주소를 계산
 
+// bp 블록 시작 주소 포인터가 바라보는 포인터의 값
+// bp 블록 시작 주소 포인터 - prev payload 포인터
+// prev가 바라보는 포인터 - prev의 payload
+// prev의 payload의 값 - 역참조 사용
+#define PREV_FREEP(bp) (*(void **)(bp))
+#define NEXT_FREEP(bp) (*(void **)((char *)(bp) + sizeof(void *)))
+#define PUT_PREV_FREE(bp, val) (PREV_FREEP(bp) = (val))
+#define PUT_NEXT_FREE(bp, val) (NEXT_FREEP(bp) = (val))
+
 #define LIST_COUNT 9 // segregated_free_list 범위 개수
 
 static char *heap_listp = NULL;
-
-typedef struct _Node {
-    struct _Node *next;
-    void *bp;
-} Node;
-
-static Node *segregated_free_list[9] = { NULL, };
+static void *segregated_free_list[LIST_COUNT] = { NULL, };
 
 void *pop_list(size_t asize)
 {
@@ -103,13 +106,13 @@ void *pop_list(size_t asize)
 
     // head가 있을 때까지 찾기
     while (idx < LIST_COUNT) {
-        Node *head = segregated_free_list[idx];
+        void *head = segregated_free_list[idx];
 
         if (head != NULL) {
             //TODO: 나중에 탐색을 통해서 best fit으로 바꿀 수도 있을 듯?
-            segregated_free_list[idx] = head->next;
-            head->next = NULL;
-            return head->bp;
+            segregated_free_list[idx] = NEXT_FREEP(head);
+            PUT_NEXT_FREE(head, NULL);
+            return head;
         }
 
         idx++;
