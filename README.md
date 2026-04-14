@@ -262,7 +262,7 @@ v2에서는 `realloc-bal.rep` 성능이 크게 좋아졌습니다. 기존에는 
 
 ### v3 - 여기서부턴 AI 많이 씀
 
-f2e0eb9185a8d2a0e21b5617c99948a82656eed3 이거 v3 태그 
+next_fit에 explicit free list
 
 ```
 Results for mm malloc:
@@ -283,7 +283,13 @@ Total          73%  112372  0.077204  1456
 Perf index = 44 (util) + 40 (thru) = 84/100
 ```
 
+#### AI 평가
+
+v3는 explicit free list 도입으로 처리량이 크게 개선되어 throughput 만점이 나왔습니다. 다만 next fit 특성상 적당한 블록을 빠르게 찾는 데 집중해서, 7번/8번 trace의 외부 단편화와 낮은 util은 여전히 남아 있습니다.
+
 ### v4
+
+best_fit에 explicit free list
 
 ```
 Results for mm malloc:
@@ -303,3 +309,7 @@ Total          75%  112372  0.064098  1753
 
 Perf index = 45 (util) + 40 (thru) = 85/100
 ```
+
+#### AI 평가
+
+v4는 best fit으로 바꾸면서 v3보다 util이 조금 좋아졌고 최종 점수도 85점으로 상승했습니다. 대신 best fit은 후보를 더 꼼꼼히 찾기 때문에 random 계열 trace에서는 속도가 일부 줄었지만, 전체 throughput 점수에는 영향이 없었습니다.
