@@ -81,7 +81,6 @@ team_t team = {
 
 static char *heap_listp = NULL;
 static void *free_listp = NULL;
-static void *next_fitp = NULL;
 
 #define PREV_FREEP(bp) (*(void **)(bp))
 #define NEXT_FREEP(bp) (*(void **)((char *)(bp) + sizeof(void *)))
@@ -100,37 +99,31 @@ static void push_list(void *bp) {
     }
 
     free_listp = bp;
-
-    if (next_fitp == NULL) {
-        next_fitp = bp;
-    }
 }
 
-static void *pop_list(size_t asize) {
-    void *start;
+static void *best_fit(size_t asize) {
     void *bp;
+    void *best_bp = NULL;
+    size_t best_size = 0;
 
-    if (free_listp == NULL) {
-        return NULL;
-    }
+    for (bp = free_listp; bp != NULL; bp = NEXT_FREEP(bp)) {
+        size_t block_size = GET_SIZE(HDRP(bp));
 
-    if (next_fitp == NULL) {
-        next_fitp = free_listp;
-    }
+        if (asize <= block_size && (best_bp == NULL || block_size < best_size)) {
+            best_bp = bp;
+            best_size = block_size;
 
-    start = next_fitp;
-    bp = start;
-
-    do {
-        if (asize <= GET_SIZE(HDRP(bp))) {
-            remove_list(bp);
-            return bp;
+            if (block_size == asize) {
+                break;
+            }
         }
+    }
 
-        bp = (NEXT_FREEP(bp) != NULL) ? NEXT_FREEP(bp) : free_listp;
-    } while (bp != start);
+    if (best_bp != NULL) {
+        remove_list(best_bp);
+    }
 
-    return NULL;
+    return best_bp;
 }
 
 static void remove_list(void *bp) {
@@ -145,14 +138,6 @@ static void remove_list(void *bp) {
 
     if (next != NULL) {
         SET_PREV_FREE(next, prev);
-    }
-
-    if (next_fitp == bp) {
-        next_fitp = (next != NULL) ? next : free_listp;
-    }
-
-    if (free_listp == NULL) {
-        next_fitp = NULL;
     }
 
     SET_PREV_FREE(bp, NULL);
@@ -238,7 +223,6 @@ int mm_init(void) {
     // heap_listp는 prologue payload 포인터
     heap_listp = heap_initp + 2 * META_SIZE;
     free_listp = NULL;
-    next_fitp = NULL;
 
     /*
      * 메모리 뷰 찍으면 이렇게 나옴
@@ -258,10 +242,6 @@ int mm_init(void) {
     return 0;
 }
 
-
-static void *next_fit(size_t asize) {
-    return pop_list(asize);
-}
 
 // 할당하는데, 필요하면 분할
 static void place(void *bp, size_t asize)
@@ -296,13 +276,13 @@ void *mm_malloc(size_t size) {
 
     asize = MAX(ALIGN(size + OVERHEAD), MIN_BLOCK_SIZE);
 
-    bp = next_fit(asize);
+    bp = best_fit(asize);
     if (bp == NULL) {
         extendsize = MAX(asize, CHUNK_SIZE);
 
         if (extend_heap(extendsize) == NULL) { return NULL; }
 
-        bp = next_fit(asize);
+        bp = best_fit(asize);
         if (bp == NULL) { return NULL; }
     }
 

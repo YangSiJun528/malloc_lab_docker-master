@@ -259,3 +259,47 @@ v2에서는 `realloc-bal.rep` 성능이 크게 좋아졌습니다. 기존에는 
 4번 `coalescing-bal.rep`의 `util`이 낮은 것은 조금 다른 이유입니다. 이 trace는 4095 byte 블록 두 개를 할당했다가 해제한 뒤 8190 byte 블록을 다시 요청하는 패턴입니다. payload 기준으로는 `4095 + 4095 = 8190`이라 딱 맞아 보이지만, allocator 내부에서는 header/footer와 8 byte alignment가 추가됩니다. 4095 byte 요청 하나는 실제로 `ALIGN(4095 + 8) = 4104` byte 블록이 필요합니다. 그런데 현재 기본 heap 확장 단위는 `CHUNK_SIZE = 4096`이므로 4095 byte 요청 하나가 기본 chunk 하나에 딱 들어가지 않습니다. 이 때문에 실제 heap 사용량이 payload보다 커지고 `util`이 낮게 나옵니다.
 
 정리하면 v2의 남은 병목은 `realloc`보다 `first_fit` 탐색 방식입니다. 다음 개선 방향은 `next fit`, explicit free list, segregated free list 순서로 생각할 수 있습니다.
+
+### v3 - 여기서부턴 AI 많이 씀
+
+f2e0eb9185a8d2a0e21b5617c99948a82656eed3 이거 v3 태그 
+
+```
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   93%    5694  0.000100 56826
+ 1       yes   92%    5848  0.000098 59857
+ 2       yes   97%    6648  0.000124 53441
+ 3       yes   98%    5380  0.000101 53110
+ 4       yes   66%   14400  0.000095151899
+ 5       yes   89%    4800  0.000426 11257
+ 6       yes   87%    4800  0.000512  9373
+ 7       yes   55%   12000  0.030521   393
+ 8       yes   51%   24000  0.044023   545
+ 9       yes   39%   14401  0.001071 13453
+10       yes   31%   14401  0.000133108035
+Total          73%  112372  0.077204  1456
+
+Perf index = 44 (util) + 40 (thru) = 84/100
+```
+
+### v4
+
+```
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   99%    5694  0.000083 68192
+ 1       yes   99%    5848  0.000096 60790
+ 2       yes   99%    6648  0.000098 67561
+ 3       yes   99%    5380  0.000079 67929
+ 4       yes   66%   14400  0.000083174123
+ 5       yes   96%    4800  0.001545  3106
+ 6       yes   95%    4800  0.001640  2927
+ 7       yes   55%   12000  0.027307   439
+ 8       yes   51%   24000  0.031545   761
+ 9       yes   28%   14401  0.001498  9616
+10       yes   35%   14401  0.000124116137
+Total          75%  112372  0.064098  1753
+
+Perf index = 45 (util) + 40 (thru) = 85/100
+```
